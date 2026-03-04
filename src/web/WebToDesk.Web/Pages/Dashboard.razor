@@ -1,1 +1,41 @@
 @page "/"
+
+<h1>WebToDesk</h1>
+
+<p>Статус: <b>@status</b></p>
+
+<div style="display:flex; gap:12px; flex-wrap:wrap;">
+    <button @onclick="ShowOpenModal">Открыть приложение</button>
+    <button disabled>Открыть Word (позже)</button>
+    <button disabled>Список файлов MinIO (позже)</button>
+</div>
+
+@if (isOpenModal)
+{
+    <div style="margin-top:16px; padding:12px; border:1px solid #cccccc; border-radius:8px; max-width:520px;">
+        <h3>Открываем файл…</h3>
+        <p>Пока это просто макет. Потом тут будет вызов desktop-приложения.</p>
+
+        <div style="display:flex; gap:8px; margin-top:12px;">
+            <button @onclick="CloseOpenModal">Закрыть</button>
+            <button disabled>Продолжить (позже)</button>
+        </div>
+    </div>
+}
+
+@code {
+    string status = "Готово";
+    bool isOpenModal = false;
+
+    void ShowOpenModal()
+    {
+        isOpenModal = true;
+        status = "Ожидаю действие пользователя…";
+    }
+
+    void CloseOpenModal()
+    {
+        isOpenModal = false;
+        status = "Готово";
+    }
+}

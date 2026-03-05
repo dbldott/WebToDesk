@@ -1,0 +1,6 @@
+# JetBrains Rider
+.idea/ *.sln.iml
+# Exclude appsettings files
+**/appsettings*.json
+# Exclude launchSettings files
+**/launchSettings*.json

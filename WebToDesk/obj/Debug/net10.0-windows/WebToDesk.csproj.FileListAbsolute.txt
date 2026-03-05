@@ -1,0 +1,15 @@
+C:\Users\user\testexe\WebToDesk\bin\Debug\net10.0-windows\app.ico
+C:\Users\user\testexe\WebToDesk\bin\Debug\net10.0-windows\WebToDesk.exe
+C:\Users\user\testexe\WebToDesk\bin\Debug\net10.0-windows\WebToDesk.deps.json
+C:\Users\user\testexe\WebToDesk\bin\Debug\net10.0-windows\WebToDesk.runtimeconfig.json
+C:\Users\user\testexe\WebToDesk\bin\Debug\net10.0-windows\WebToDesk.dll
+C:\Users\user\testexe\WebToDesk\bin\Debug\net10.0-windows\WebToDesk.pdb
+C:\Users\user\testexe\WebToDesk\obj\Debug\net10.0-windows\WebToDesk.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\user\testexe\WebToDesk\obj\Debug\net10.0-windows\WebToDesk.AssemblyInfoInputs.cache
+C:\Users\user\testexe\WebToDesk\obj\Debug\net10.0-windows\WebToDesk.AssemblyInfo.cs
+C:\Users\user\testexe\WebToDesk\obj\Debug\net10.0-windows\WebToDesk.csproj.CoreCompileInputs.cache
+C:\Users\user\testexe\WebToDesk\obj\Debug\net10.0-windows\WebToDesk.dll
+C:\Users\user\testexe\WebToDesk\obj\Debug\net10.0-windows\refint\WebToDesk.dll
+C:\Users\user\testexe\WebToDesk\obj\Debug\net10.0-windows\WebToDesk.pdb
+C:\Users\user\testexe\WebToDesk\obj\Debug\net10.0-windows\WebToDesk.genruntimeconfig.cache
+C:\Users\user\testexe\WebToDesk\obj\Debug\net10.0-windows\ref\WebToDesk.dll

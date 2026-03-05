@@ -10,7 +10,9 @@ app.UseCors(x => x.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
 
 app.MapPost("/open-app", () =>
 {
-    var exePath = @"C:\Users\Aimer\Desktop\prjct\WebToDesk\src\desktop\Desktop.App\MyApp\bin\Debug\net10.0-windows\MyApp.exe";
+    var user = Environment.UserName;
+
+    var exePath = $@"C:\Users\{user}\prjct\WebToDesk\src\desktop\Desktop.App\WebToDesk\bin\Debug\net10.0-windows\WebToDesk.exe";
     if (!File.Exists(exePath)) return Results.NotFound("EXE не найден");
 
     Process.Start(new ProcessStartInfo { FileName = exePath, UseShellExecute = true });

@@ -1,33 +1,99 @@
 using System;
-using System.Windows.Forms;
 using System.Diagnostics;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace WebToDesk;
 
 public partial class Form1 : Form
 {
-    public Form1()
+    private readonly HttpClient _httpClient = new();
+
+    // Больше не генерируем sessionId здесь.
+    // Теперь он приходит снаружи, из Program.cs.
+    private readonly string _sessionId;
+
+    private bool _isWordOpen = false;
+
+    private DateTimeOffset? _startedAt = null;
+    private DateTimeOffset? _closedAt = null;
+
+    private const string ApiBaseUrl = "http://localhost:5298";
+    private const int StartupDelayMs = 2000;
+
+    // Конструктор теперь принимает sessionId
+    public Form1(string sessionId)
     {
         InitializeComponent();
 
-        this.Shown += async (_, __) => await OpenWordThenExitAsync();
+        _sessionId = sessionId;
 
-        // Через 5 секунд прячем окно
-        timer1.Tick += Timer1_Tick;
-        timer1.Start();
-
-        // Двойной клик по иконке в трее — вернуть окно
+        this.Shown += async (_, __) => await StartWorkflowAsync();
         notifyIcon1.DoubleClick += NotifyIcon1_DoubleClick;
     }
 
-    private void Timer1_Tick(object? sender, EventArgs e)
+    private async Task StartWorkflowAsync()
     {
-        timer1.Stop();
+        try
+        {
+            await Task.Delay(StartupDelayMs);
+
+            HideToTray();
+
+            var wordProcess = StartWord();
+
+            if (wordProcess == null)
+            {
+                await SendStatusAsync("error", "Не удалось запустить Word.");
+                MessageBox.Show("Не удалось запустить Word (winword.exe).");
+                return;
+            }
+
+            _isWordOpen = true;
+            _startedAt = DateTimeOffset.Now;
+            _closedAt = null;
+
+            await SendStatusAsync("running");
+
+            await wordProcess.WaitForExitAsync();
+
+            _isWordOpen = false;
+            _closedAt = DateTimeOffset.Now;
+
+            await SendStatusAsync("closed");
+
+            ExitApp();
+        }
+        catch (Exception ex)
+        {
+            _isWordOpen = false;
+            _closedAt = DateTimeOffset.Now;
+
+            await SendStatusAsync("error", ex.Message);
+            MessageBox.Show($"Ошибка: {ex.Message}");
+        }
+    }
+
+    private Process? StartWord()
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "winword.exe",
+            UseShellExecute = true
+        };
+
+        return Process.Start(psi);
+    }
+
+    private void HideToTray()
+    {
         this.Hide();
         this.ShowInTaskbar = false;
     }
 
-    private void NotifyIcon1_DoubleClick(object? sender, EventArgs e)
+    private void ShowFromTray()
     {
         this.Show();
         this.ShowInTaskbar = true;
@@ -35,14 +101,17 @@ public partial class Form1 : Form
         this.Activate();
     }
 
+    private void NotifyIcon1_DoubleClick(object? sender, EventArgs e)
+    {
+        ShowFromTray();
+    }
+
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        // Нажал крестик — не закрываем процесс, а прячем в трей
         if (e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
-            this.Hide();
-            this.ShowInTaskbar = false;
+            HideToTray();
             return;
         }
 
@@ -51,53 +120,54 @@ public partial class Form1 : Form
 
     private void SettingsItem_Click(object? sender, EventArgs e)
     {
-        this.Show();
-        this.ShowInTaskbar = true;
-        this.WindowState = FormWindowState.Normal;
-        this.Activate();
+        ShowFromTray();
     }
 
     private void ExitItem_Click(object? sender, EventArgs e)
+    {
+        ExitApp();
+    }
+
+    private void ExitApp()
     {
         notifyIcon1.Visible = false;
         notifyIcon1.Dispose();
         Application.Exit();
     }
 
-    private async Task OpenWordThenExitAsync()
-{
-    // 1) показать окно 5 сек
-    await Task.Delay(5000);
-
-    // 2) спрятаться в трей
-    this.Hide();
-    this.ShowInTaskbar = false;
-
-    // 3) открыть Word
-    var psi = new ProcessStartInfo
+    private async Task SendStatusAsync(string status, string? errorMessage = null)
     {
-        FileName = "winword.exe",
-        UseShellExecute = true
-    };
+        try
+        {
+            var payload = new WordStatusUpdateRequest
+            {
+                SessionId = _sessionId,
+                Status = status,
+                IsWordOpen = _isWordOpen,
+                StartedAt = _startedAt,
+                ClosedAt = _closedAt,
+                ErrorMessage = errorMessage
+            };
 
-    using var p = Process.Start(psi);
-    if (p == null)
-    {
-        MessageBox.Show("Не удалось запустить Word (winword.exe).");
-        return;
+            var response = await _httpClient.PostAsJsonAsync(
+                $"{ApiBaseUrl}/word-status-update",
+                payload
+            );
+
+            response.EnsureSuccessStatusCode();
+        }
+        catch
+        {
+        }
     }
-
-    // 4) ждать закрытия Word
-    await p.WaitForExitAsync();
-
-    // 5) закрыть наше приложение
-    ExitApp();
 }
 
-private void ExitApp()
+public class WordStatusUpdateRequest
 {
-    notifyIcon1.Visible = false;
-    notifyIcon1.Dispose();
-    Application.Exit();
-}
+    public string SessionId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsWordOpen { get; set; }
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? ClosedAt { get; set; }
+    public string? ErrorMessage { get; set; }
 }

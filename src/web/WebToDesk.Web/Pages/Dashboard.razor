@@ -1,41 +1,223 @@
 @page "/"
+@using System.Net.Http.Json
 @inject HttpClient http
 
 <h1>WebToDesk</h1>
 
 <p>Статус: <b>@status</b></p>
+<p>SessionId: <b>@(string.IsNullOrWhiteSpace(sessionId) ? "-" : sessionId)</b></p>
+<p>Начало: <b>@FormatDateTime(startedAt)</b></p>
+<p>Конец: <b>@FormatDateTime(closedAt)</b></p>
+<p>Время использования: <b>@elapsedText</b></p>
 
-<button @onclick="ShowOpenModal">Открыть приложение</button>
+<button @onclick="OpenAppAsync" disabled="@isBusy">Открыть приложение</button>
+
+@if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <p style="color:red;">Ошибка: @errorMessage</p>
+}
 
 @code {
-    string status = "Готово";
+    // Текущий текст статуса на странице
+    private string status = "Готово";
 
-    async Task ShowOpenModal()
+    // Идентификатор текущей сессии
+    private string sessionId = "";
+
+    // Текст таймера
+    private string elapsedText = "00:00:00";
+
+    // Время начала
+    private DateTimeOffset? startedAt;
+
+    // Время конца
+    private DateTimeOffset? closedAt;
+
+    // Текст ошибки
+    private string? errorMessage;
+
+    // Чтобы не жали кнопку много раз подряд
+    private bool isBusy = false;
+
+    // Таймер для опроса API
+    private PeriodicTimer? pollTimer;
+
+    // Нажатие на кнопку "Открыть приложение"
+    private async Task OpenAppAsync()
     {
-        status = "Шаг 1: Отправка POST...";
-        Console.WriteLine(status);
-
         try
         {
-            var res = await http.PostAsync("http://localhost:5298/open-app", null);
+            isBusy = true;
+            errorMessage = null;
+
+            // Сразу сбрасываем старые значения
+            status = "Шаг 1: Отправка POST...";
+            sessionId = Guid.NewGuid().ToString();
+            startedAt = null;
+            closedAt = null;
+            elapsedText = "00:00:00";
+
+            Console.WriteLine(status);
+
+            // Отправляем sessionId в API
+            var request = new OpenAppRequest
+            {
+                SessionId = sessionId
+            };
+
+            var res = await http.PostAsJsonAsync("http://localhost:5298/open-app", request);
 
             status = $"Шаг 2: Получен ответ: {res.StatusCode}";
             Console.WriteLine(status);
-    
+
             if (res.IsSuccessStatusCode)
             {
-                status = "Шаг 3: Приложение открыто!";
+                status = "Шаг 3: Ожидаем открытие Word...";
+                Console.WriteLine(status);
+
+                // Начинаем опрашивать API раз в секунду
+                await StartPollingAsync();
             }
             else
             {
                 status = $"Шаг 3: Ошибка запуска, HTTP {(int)res.StatusCode}";
+                Console.WriteLine(status);
             }
-            Console.WriteLine(status);
         }
         catch (Exception ex)
         {
             status = $"Шаг X: Исключение: {ex.Message}";
+            errorMessage = ex.Message;
             Console.WriteLine(status);
         }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    // Запускаем периодический опрос API
+    private async Task StartPollingAsync()
+    {
+        // Если старый таймер был, убираем его
+        pollTimer?.Dispose();
+
+        // Новый таймер: тик раз в 1 секунду
+        pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (await pollTimer.WaitForNextTickAsync())
+                {
+                    await LoadStatusAsync();
+
+                    // Если Word закрыт или произошла ошибка — прекращаем опрос
+                    if (status == "Word закрыт" || status == "Ошибка")
+                    {
+                        pollTimer.Dispose();
+                        break;
+                    }
+                }
+            }
+            catch
+            {
+            }
+        });
+
+        await Task.CompletedTask;
+    }
+
+    // Загружаем текущий статус из API
+    private async Task LoadStatusAsync()
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return;
+
+        try
+        {
+            var res = await http.GetAsync($"http://localhost:5298/word-status/{sessionId}");
+
+            // Пока API ещё не знает эту сессию — просто ждём
+            if (!res.IsSuccessStatusCode)
+            {
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var dto = await res.Content.ReadFromJsonAsync<WordStatusResponse>();
+            if (dto is null)
+                return;
+
+            startedAt = dto.StartedAt;
+            closedAt = dto.ClosedAt;
+            errorMessage = dto.ErrorMessage;
+
+            // Если Word открыт
+            if (dto.Status == "running")
+            {
+                status = "Word открыт";
+
+                if (dto.StartedAt.HasValue)
+                {
+                    var elapsed = DateTimeOffset.Now - dto.StartedAt.Value;
+                    elapsedText = elapsed.ToString(@"hh\:mm\:ss");
+                }
+            }
+            // Если Word закрыт
+            else if (dto.Status == "closed")
+            {
+                status = "Word закрыт";
+
+                if (dto.StartedAt.HasValue && dto.ClosedAt.HasValue)
+                {
+                    var elapsed = dto.ClosedAt.Value - dto.StartedAt.Value;
+                    elapsedText = elapsed.ToString(@"hh\:mm\:ss");
+                }
+            }
+            // Если ошибка
+            else if (dto.Status == "error")
+            {
+                status = "Ошибка";
+            }
+            else
+            {
+                status = $"Ожидание статуса: {dto.Status}";
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            status = "Ошибка";
+            errorMessage = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // Красивый вывод даты
+    private string FormatDateTime(DateTimeOffset? value)
+    {
+        return value.HasValue
+            ? value.Value.ToString("dd.MM.yyyy HH:mm:ss")
+            : "-";
+    }
+
+    // Что отправляем в API при запуске приложения
+    public class OpenAppRequest
+    {
+        public string SessionId { get; set; } = string.Empty;
+    }
+
+    // Что получаем из API при чтении статуса
+    public class WordStatusResponse
+    {
+        public string SessionId { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public bool IsWordOpen { get; set; }
+        public DateTimeOffset? StartedAt { get; set; }
+        public DateTimeOffset? ClosedAt { get; set; }
+        public string? ErrorMessage { get; set; }
     }
 }

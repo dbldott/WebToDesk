@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddCors();
@@ -7,32 +8,45 @@ var app = builder.Build();
 
 app.UseCors(x => x.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
 
-var statusStore = new Dictionary<string, WordStatusUpdateRequest>();
+var statusStore = new ConcurrentDictionary<string, WordStatusUpdateRequest>();
 
 app.MapPost("/open-app", (OpenAppRequest request) =>
 {
-    var user = Environment.UserName;
+    var baseDir = AppContext.BaseDirectory;
+    var exePath = Path.GetFullPath(Path.Combine(baseDir, "..", "Desktop", "WebToDesk.exe"));
+    var exeDir = Path.GetDirectoryName(exePath)!;
 
-    var exePath = $@"C:\Users\{user}\WebToDesk\src\desktop\Desktop.App\WebToDesk\bin\Debug\net10.0-windows\WebToDesk.exe";
+    Console.WriteLine("===== OPEN-APP =====");
+    Console.WriteLine($"SessionId: {request.SessionId}");
+    Console.WriteLine($"Api BaseDir: {baseDir}");
+    Console.WriteLine($"ExePath: {exePath}");
+    Console.WriteLine($"ExeDir: {exeDir}");
+    Console.WriteLine($"Exe Exists: {File.Exists(exePath)}");
+    Console.WriteLine("====================");
 
     if (!File.Exists(exePath))
-    {
-        return Results.NotFound("EXE не найден");
-    }
+        return Results.NotFound($"EXE не найден: {exePath}");
 
-    Console.WriteLine($"OPEN-APP SessionId: {request.SessionId}");
-
-    Process.Start(new ProcessStartInfo
+    var psi = new ProcessStartInfo
     {
         FileName = exePath,
         Arguments = request.SessionId,
+        WorkingDirectory = exeDir,
         UseShellExecute = true
-    });
+    };
+
+    var process = Process.Start(psi);
+
+    Console.WriteLine($"Process started: {process != null}");
+    Console.WriteLine($"ProcessId: {process?.Id}");
 
     return Results.Ok(new
     {
         message = "Запущено",
-        sessionId = request.SessionId
+        sessionId = request.SessionId,
+        exePath,
+        exeDir,
+        processId = process?.Id
     });
 });
 
@@ -44,11 +58,8 @@ app.MapPost("/word-status-update", (WordStatusUpdateRequest dto) =>
     Console.WriteLine($"SessionId: {dto.SessionId}");
     Console.WriteLine($"Status: {dto.Status}");
     Console.WriteLine($"IsWordOpen: {dto.IsWordOpen}");
-
-    // Чтобы лог был понятнее, лучше явно форматировать
     Console.WriteLine($"StartedAt: {dto.StartedAt:yyyy-MM-dd HH:mm:ss zzz}");
     Console.WriteLine($"ClosedAt: {dto.ClosedAt:yyyy-MM-dd HH:mm:ss zzz}");
-
     Console.WriteLine($"ErrorMessage: {dto.ErrorMessage}");
     Console.WriteLine("------------------------------");
 
@@ -58,9 +69,7 @@ app.MapPost("/word-status-update", (WordStatusUpdateRequest dto) =>
 app.MapGet("/word-status/{sessionId}", (string sessionId) =>
 {
     if (!statusStore.TryGetValue(sessionId, out var status))
-    {
         return Results.NotFound("Статус не найден");
-    }
 
     return Results.Ok(status);
 });
@@ -74,10 +83,8 @@ public class WordStatusUpdateRequest
     public string SessionId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public bool IsWordOpen { get; set; }
-
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? ClosedAt { get; set; }
-
     public string? ErrorMessage { get; set; }
 }
 
@@ -85,10 +92,3 @@ public class OpenAppRequest
 {
     public string SessionId { get; set; } = string.Empty;
 }
-
-
-
-
-
-
-

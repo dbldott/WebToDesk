@@ -13,8 +13,8 @@ app.MapPost("/open-app", (OpenAppRequest request) =>
 {
     var user = Environment.UserName;
 
-    var exePath = $@"C:\Users\{user}\Prjct\WebToDesk\src\desktop\Desktop.App\WebToDesk\bin\Debug\net10.0-windows\WebToDesk.exe";
-    
+    // var exePath = $@"C:\Sayat\C_Sharp\WebToDesk\src\desktop\Desktop.App\WebToDesk\bin\Debug\net10.0-windows\WebToDesk.exe";
+    var exePath = @"C:\Sayat\C_Sharp\WebToDesk\src\desktop\Desktop.App\WebToDesk\bin\Debug\net10.0-windows\WebToDesk.exe";
     if (!File.Exists(exePath))
     {
         return Results.NotFound("EXE не найден");

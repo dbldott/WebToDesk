@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/api/">
+    <Project Path="api/WebToDesk.Api/WebToDesk.Api.csproj" />
+  </Folder>
+  <Folder Name="/desktop/" />
+  <Folder Name="/desktop/Desktop.App/">
+    <Project Path="desktop/Desktop.App/WebToDesk/WebToDesk.csproj" />
+  </Folder>
+  <Folder Name="/web/">
+    <Project Path="web/WebToDesk.Web/WebToDesk.Web.csproj" />
+  </Folder>
+</Solution>

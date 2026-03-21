@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -11,43 +12,49 @@ public partial class Form1 : Form
 {
     private readonly HttpClient _httpClient = new();
 
-    // Больше не генерируем sessionId здесь.
-    // Теперь он приходит снаружи, из Program.cs.
-    private readonly string _sessionId;
-
+    private string _sessionId = string.Empty;
     private bool _isWordOpen = false;
 
     private DateTimeOffset? _startedAt = null;
     private DateTimeOffset? _closedAt = null;
 
-    private const string ApiBaseUrl = "http://localhost:5298";
-    private const int StartupDelayMs = 2000;
+    private SynchronizationContext? _uiContext;
 
-    // Конструктор теперь принимает sessionId
-    public Form1(string sessionId)
+    private const string ApiBaseUrl = "http://localhost:5000";
+
+    public Form1()
     {
         InitializeComponent();
 
-        _sessionId = sessionId;
-
-        this.Shown += async (_, __) => await StartWorkflowAsync();
+        this.Shown += Form1_Shown;
         notifyIcon1.DoubleClick += NotifyIcon1_DoubleClick;
     }
 
-    private async Task StartWorkflowAsync()
+    private void Form1_Shown(object? sender, EventArgs e)
     {
+        _uiContext = SynchronizationContext.Current;
+        HideToTray();
+        AppCommands.Register(OpenWordFromSignal);
+    }
+
+    private void OpenWordFromSignal(string sessionId)
+    {
+        _uiContext?.Post(_ => _ = StartWordSessionAsync(sessionId), null);
+    }
+
+    private async Task StartWordSessionAsync(string sessionId)
+    {
+        if (_isWordOpen) return;
+
+        _sessionId = sessionId;
+
         try
         {
-            await Task.Delay(StartupDelayMs);
-
-            HideToTray();
-
             var wordProcess = StartWord();
 
             if (wordProcess == null)
             {
                 await SendStatusAsync("error", "Не удалось запустить Word.");
-                MessageBox.Show("Не удалось запустить Word (winword.exe).");
                 return;
             }
 
@@ -63,8 +70,7 @@ public partial class Form1 : Form
             _closedAt = DateTimeOffset.Now;
 
             await SendStatusAsync("closed");
-
-            ExitApp();
+            // Приложение остаётся в трее — Word закрылся, но мы продолжаем работать
         }
         catch (Exception ex)
         {
@@ -72,7 +78,6 @@ public partial class Form1 : Form
             _closedAt = DateTimeOffset.Now;
 
             await SendStatusAsync("error", ex.Message);
-            MessageBox.Show($"Ошибка: {ex.Message}");
         }
     }
 

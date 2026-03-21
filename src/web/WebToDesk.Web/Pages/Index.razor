@@ -1,0 +1,247 @@
+@page "/"
+
+@using System.Net.Http.Headers
+@using System.Xml
+@inject HttpClient http
+@inject IJSRuntime JS
+
+<div class="d-flex justify-content-between align-items-center">
+    <h1>WebToDesk</h1>
+    <a href="http://localhost:9001" target="_blank" class="btn btn-sm btn-outline-secondary" style="font-size: 0.7rem; padding: 2px 5px;">
+        ⚙️ MinIO Console
+    </a>
+</div>
+
+<div class="status-panel" style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+        <p style="margin:0">Статус: <b style="color: @(status.Contains("Ошибка") ? "red" : "blue")">@status</b></p>
+        <p style="margin:0">SessionId: <b>@(string.IsNullOrWhiteSpace(sessionId) ? "-" : sessionId)</b></p>
+        <p style="margin:0">Время использования: <b>@elapsedText</b></p>
+    </div>
+</div>
+
+<div class="actions" style="display: flex; gap: 10px; align-items: center; background: #eee; padding: 15px; border-radius: 8px;">
+    <button @onclick="OpenAppAsync" disabled="@isBusy" class="btn btn-primary">Открыть Word</button>
+
+    <InputFile OnChange="HandleFileSelected" id="filePicker" style="display:none" />
+    <button class="btn btn-secondary" onclick="document.getElementById('filePicker').click()" disabled="@isBusy">📎 Выбрать файл</button>
+
+    @if (selectedFile != null)
+    {
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">📄 @selectedFile.Name</span>
+            <button @onclick="UploadToMinioHttp" class="btn btn-success" disabled="@isBusy">
+                🚀 Сохранить в MinIO
+            </button>
+        </div>
+    }
+</div>
+
+@if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger" style="color:red; margin-top: 20px; border: 1px solid red; padding: 10px; border-radius: 5px;">
+        <b>Ошибка:</b> @errorMessage
+    </div>
+}
+
+<hr />
+
+<div class="file-list-section" style="margin-top: 30px;">
+    <div class="d-flex justify-content-between align-items-center">
+        <h3>Файлы в хранилище</h3>
+        <div style="display: flex; gap: 10px;">
+            @if (uploadedFiles.Any())
+            {
+                <button class="btn btn-sm btn-outline-dark" @onclick="ToggleSelectAll">
+                    @(selectedFiles.Count == uploadedFiles.Count ? "Снять всё" : "Выбрать всё")
+                </button>
+                <button class="btn btn-sm btn-danger" @onclick="DownloadSelected" disabled="@(!selectedFiles.Any() || isBusy)">
+                    📥 Скачать выбранные (@selectedFiles.Count)
+                </button>
+            }
+            <button class="btn btn-sm btn-outline-primary" @onclick="RefreshFileList">🔄 Обновить</button>
+        </div>
+    </div>
+
+    @if (uploadedFiles.Count == 0)
+    {
+        <p style="color: gray; font-style: italic; margin-top: 10px;">Список пуст. Загрузите файл или проверьте MinIO.</p>
+    }
+    else
+    {
+        <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
+            @foreach (var file in uploadedFiles)
+            {
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 1px solid #eee; border-radius: 6px; background: white; transition: 0.3s;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <input type="checkbox" 
+                               checked="@selectedFiles.Contains(file)" 
+                               @onchange="@((e) => ToggleFileSelection(file, e.Value))" 
+                               style="width: 18px; height: 18px; cursor: pointer;" />
+                        <span style="font-weight: 500;">@file</span>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <a href="http://localhost:9000/bucket/@file" target="_blank" class="btn btn-sm btn-info" style="color: white; text-decoration: none;">Открыть</a>
+                        <a href="http://localhost:9000/bucket/@file" download="@file" class="btn btn-sm btn-success" style="color: white; text-decoration: none;">Скачать</a>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private string status = "Готово";
+    private string sessionId = "";
+    private string elapsedText = "00:00:00";
+    private string? errorMessage;
+    private bool isBusy = false;
+    private PeriodicTimer? pollTimer;
+
+    private IBrowserFile? selectedFile;
+    private List<string> uploadedFiles = new(); 
+    private HashSet<string> selectedFiles = new(); // Для хранения выбранных файлов
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshFileList();
+    }
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        errorMessage = null;
+        status = $"Файл выбран: {selectedFile.Name}";
+    }
+
+    private void ToggleFileSelection(string fileName, object? isChecked)
+    {
+        if ((bool)(isChecked ?? false)) selectedFiles.Add(fileName);
+        else selectedFiles.Remove(fileName);
+    }
+
+    private void ToggleSelectAll()
+    {
+        if (selectedFiles.Count == uploadedFiles.Count) selectedFiles.Clear();
+        else selectedFiles = new HashSet<string>(uploadedFiles);
+    }
+
+    private async Task RefreshFileList()
+    {
+        try
+        {
+            isBusy = true;
+            var response = await http.GetStringAsync("http://localhost:9000/bucket");
+            if (!string.IsNullOrEmpty(response))
+            {
+                var doc = new XmlDocument();
+                doc.LoadXml(response);
+                var nsmgr = new XmlNamespaceManager(doc.NameTable);
+                nsmgr.AddNamespace("s3", "http://s3.amazonaws.com/doc/2006-03-01/");
+                var nodes = doc.SelectNodes("//s3:Contents/s3:Key", nsmgr);
+                
+                uploadedFiles.Clear();
+                selectedFiles.Clear();
+                if (nodes != null)
+                {
+                    foreach (XmlNode node in nodes) uploadedFiles.Add(node.InnerText);
+                }
+                status = "Список синхронизирован";
+            }
+        }
+        catch { status = "Ошибка обновления списка"; }
+        finally { isBusy = false; }
+    }
+
+    private async Task UploadToMinioHttp()
+    {
+        if (selectedFile == null) return;
+        try
+        {
+            isBusy = true;
+            status = "Загрузка...";
+            using var stream = selectedFile.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+            var content = new StreamContent(stream);
+            content.Headers.ContentType = new MediaTypeHeaderValue(selectedFile.ContentType ?? "application/octet-stream");
+            var response = await http.PutAsync($"http://localhost:9000/bucket/{selectedFile.Name}", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                status = "✅ Загружено!";
+                selectedFile = null;
+                await RefreshFileList();
+            }
+            else { status = "❌ Ошибка загрузки"; }
+        }
+        catch (Exception ex) { errorMessage = ex.Message; }
+        finally { isBusy = false; }
+    }
+
+    private async Task DownloadSelected()
+    {
+        isBusy = true;
+        status = $"Выгрузка {selectedFiles.Count} файлов...";
+        foreach (var file in selectedFiles)
+        {
+            var url = $"http://localhost:9000/bucket/{file}";
+            // Эмуляция клика для каждого файла с паузой
+            await JS.InvokeVoidAsync("eval", $@"
+                var a = document.createElement('a');
+                a.href = '{url}';
+                a.download = '{file}';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            ");
+            await Task.Delay(600); 
+        }
+        status = "✅ Выгрузка завершена";
+        selectedFiles.Clear();
+        isBusy = false;
+    }
+
+    // --- Оригинальная логика Word ---
+    private async Task OpenAppAsync()
+    {
+        try {
+            isBusy = true;
+            sessionId = Guid.NewGuid().ToString();
+            var res = await http.PostAsJsonAsync("open-app", new { SessionId = sessionId });
+            if (res.IsSuccessStatusCode) await StartPollingAsync();
+        } catch (Exception ex) { errorMessage = ex.Message; }
+        finally { isBusy = false; }
+    }
+
+    private async Task StartPollingAsync()
+    {
+        pollTimer?.Dispose();
+        pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        _ = Task.Run(async () => {
+            while (await pollTimer.WaitForNextTickAsync()) {
+                await LoadStatusAsync();
+                if (status == "Word закрыт") break;
+            }
+        });
+    }
+
+    private async Task LoadStatusAsync()
+    {
+        try {
+            var res = await http.GetAsync($"word-status/{sessionId}");
+            if (res.IsSuccessStatusCode) {
+                var dto = await res.Content.ReadFromJsonAsync<WordStatusResponse>();
+                if (dto != null) {
+                    status = dto.Status == "running" ? "Word открыт" : "Word закрыт";
+                    if (dto.StartedAt.HasValue) 
+                        elapsedText = (DateTimeOffset.Now - dto.StartedAt.Value).ToString(@"hh\:mm\:ss");
+                }
+            }
+            await InvokeAsync(StateHasChanged);
+        } catch { }
+    }
+
+    public class WordStatusResponse {
+        public string Status { get; set; } = "";
+        public DateTimeOffset? StartedAt { get; set; }
+    }
+}

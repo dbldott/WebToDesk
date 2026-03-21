@@ -1,4 +1,4 @@
-@page "/"
+
 @using System.Net.Http.Headers
 @using System.Xml
 @inject HttpClient http
@@ -20,7 +20,9 @@
 </div>
 
 <div class="actions" style="display: flex; gap: 10px; align-items: center; background: #eee; padding: 15px; border-radius: 8px;">
-    <button @onclick="OpenAppAsync" disabled="@isBusy" class="btn btn-primary">Открыть Word</button>
+    <button @onclick="OpenAppAsync" disabled="@(isBusy || isWordRunning)" class="btn btn-primary">
+        @(isWordRunning ? "⏳ Word открыт..." : "Открыть Word")
+    </button>
 
     <InputFile OnChange="HandleFileSelected" id="filePicker" style="display:none" />
     <button class="btn btn-secondary" onclick="document.getElementById('filePicker').click()" disabled="@isBusy">📎 Выбрать файл</button>
@@ -95,6 +97,7 @@
     private string elapsedText = "00:00:00";
     private string? errorMessage;
     private bool isBusy = false;
+    private bool isWordRunning = false;
     private PeriodicTimer? pollTimer;
 
     private IBrowserFile? selectedFile;
@@ -199,44 +202,67 @@
         isBusy = false;
     }
 
-    // --- Оригинальная логика Word ---
+    // --- Логика Word ---
     private async Task OpenAppAsync()
     {
-        try {
+        try
+        {
             isBusy = true;
+            errorMessage = null;
             sessionId = Guid.NewGuid().ToString();
-            var res = await http.PostAsJsonAsync("http://localhost:5298/open-app", new { SessionId = sessionId });
-            if (res.IsSuccessStatusCode) await StartPollingAsync();
-        } catch (Exception ex) { errorMessage = ex.Message; }
+            var res = await http.PostAsJsonAsync("/open-app", new { SessionId = sessionId });
+            if (res.IsSuccessStatusCode)
+            {
+                isWordRunning = true;
+                status = "Запускаем Word...";
+                StartPolling();
+            }
+        }
+        catch (Exception ex) { errorMessage = ex.Message; }
         finally { isBusy = false; }
     }
 
-    private async Task StartPollingAsync()
+    private void StartPolling()
     {
         pollTimer?.Dispose();
         pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-        _ = Task.Run(async () => {
-            while (await pollTimer.WaitForNextTickAsync()) {
+        _ = Task.Run(async () =>
+        {
+            while (await pollTimer.WaitForNextTickAsync())
+            {
                 await LoadStatusAsync();
-                if (status == "Word закрыт") break;
+                if (!isWordRunning) break;
             }
         });
     }
 
     private async Task LoadStatusAsync()
     {
-        try {
-            var res = await http.GetAsync($"http://localhost:5298/word-status/{sessionId}");
-            if (res.IsSuccessStatusCode) {
+        try
+        {
+            var res = await http.GetAsync($"/word-status/{sessionId}");
+            if (res.IsSuccessStatusCode)
+            {
                 var dto = await res.Content.ReadFromJsonAsync<WordStatusResponse>();
-                if (dto != null) {
-                    status = dto.Status == "running" ? "Word открыт" : "Word закрыт";
-                    if (dto.StartedAt.HasValue) 
-                        elapsedText = (DateTimeOffset.Now - dto.StartedAt.Value).ToString(@"hh\:mm\:ss");
+                if (dto != null)
+                {
+                    if (dto.Status == "running")
+                    {
+                        status = "Word открыт";
+                        if (dto.StartedAt.HasValue)
+                            elapsedText = (DateTimeOffset.Now - dto.StartedAt.Value).ToString(@"hh\:mm\:ss");
+                    }
+                    else if (dto.Status == "closed" || dto.Status == "error")
+                    {
+                        status = dto.Status == "closed" ? "Word закрыт" : $"Ошибка Word";
+                        isWordRunning = false;
+                        pollTimer?.Dispose();
+                    }
                 }
             }
             await InvokeAsync(StateHasChanged);
-        } catch { }
+        }
+        catch { }
     }
 
     public class WordStatusResponse {

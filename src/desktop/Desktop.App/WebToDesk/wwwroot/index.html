@@ -27,6 +27,49 @@
     </div>
 
     <script src="_framework/blazor.webassembly.js"></script>
+
+    <script>
+        // Вставить текст в редактор
+        window.wtdSetContent = function (text, isHtml) {
+            var el = document.getElementById('richEditor');
+            if (!el) return;
+            if (isHtml || (text && text.trim().startsWith('<'))) {
+                el.innerHTML = text;
+            } else {
+                el.innerHTML = text
+                    ? text.replace(/&/g, '&amp;')
+                           .replace(/</g, '&lt;')
+                           .replace(/>/g, '&gt;')
+                           .replace(/\n/g, '<br>')
+                    : '';
+            }
+            el.focus();
+        };
+
+        // Получить HTML из редактора (для TXT)
+        window.wtdGetContent = function () {
+            var el = document.getElementById('richEditor');
+            return el ? el.innerHTML : '';
+        };
+
+        // Получить plain text из редактора (для DOCX)
+        window.wtdGetPlainText = function () {
+            var el = document.getElementById('richEditor');
+            if (!el) return '';
+            
+            // Заменяем <br> и закрывающие блочные теги на переносы строк
+
+            var html = el.innerHTML;
+            html = html.replace(/<br\s*\/?>/gi, '\n');
+            html = html.replace(/<\/p>/gi, '\n');
+            html = html.replace(/<\/div>/gi, '\n');
+
+            // Убираем все оставшиеся теги
+            var tmp = document.createElement('div');
+            tmp.innerHTML = html;
+            return tmp.textContent || tmp.innerText || '';
+        };
+    </script>
 </body>
 
 </html>

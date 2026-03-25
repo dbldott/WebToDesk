@@ -70,7 +70,7 @@ public partial class Form1 : Form
             _closedAt = DateTimeOffset.Now;
 
             await SendStatusAsync("closed");
-            // Приложение остаётся в трее — Word закрылся, но мы продолжаем работать
+         
         }
         catch (Exception ex)
         {
@@ -165,14 +165,4 @@ public partial class Form1 : Form
         {
         }
     }
-}
-
-public class WordStatusUpdateRequest
-{
-    public string SessionId { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty;
-    public bool IsWordOpen { get; set; }
-    public DateTimeOffset? StartedAt { get; set; }
-    public DateTimeOffset? ClosedAt { get; set; }
-    public string? ErrorMessage { get; set; }
 }

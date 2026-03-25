@@ -1,95 +1,181 @@
+@page "/"
 
 @using System.Net.Http.Headers
 @using System.Xml
 @inject HttpClient http
 @inject IJSRuntime JS
 
-<div class="d-flex justify-content-between align-items-center">
-    <h1>WebToDesk</h1>
-    <a href="http://localhost:9001" target="_blank" class="btn btn-sm btn-outline-secondary" style="font-size: 0.7rem; padding: 2px 5px;">
-        ⚙️ MinIO Console
-    </a>
-</div>
-
-<div class="status-panel" style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9;">
-    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-        <p style="margin:0">Статус: <b style="color: @(status.Contains("Ошибка") ? "red" : "blue")">@status</b></p>
-        <p style="margin:0">SessionId: <b>@(string.IsNullOrWhiteSpace(sessionId) ? "-" : sessionId)</b></p>
-        <p style="margin:0">Время использования: <b>@elapsedText</b></p>
+@if (!isEditorOpen)
+{
+    <div class="d-flex justify-content-between align-items-center">
+        <h1>WebToDesk</h1>
+        <a href="http://localhost:9001" target="_blank" class="btn btn-sm btn-outline-secondary" style="font-size: 0.7rem; padding: 2px 5px;">
+            ⚙️ MinIO Console
+        </a>
     </div>
-</div>
 
-<div class="actions" style="display: flex; gap: 10px; align-items: center; background: #eee; padding: 15px; border-radius: 8px;">
-    <button @onclick="OpenAppAsync" disabled="@(isBusy || isWordRunning)" class="btn btn-primary">
-        @(isWordRunning ? "⏳ Word открыт..." : "Открыть Word")
-    </button>
+    <div class="status-panel" style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+            <p style="margin:0">Статус: <b style="color: @(status.Contains("Ошибка") ? "red" : "blue")">@status</b></p>
+            <p style="margin:0">SessionId: <b>@(string.IsNullOrWhiteSpace(sessionId) ? "-" : sessionId)</b></p>
+            <p style="margin:0">Время использования: <b>@elapsedText</b></p>
+        </div>
+    </div>
 
-    <InputFile OnChange="HandleFileSelected" id="filePicker" style="display:none" />
-    <button class="btn btn-secondary" onclick="document.getElementById('filePicker').click()" disabled="@isBusy">📎 Выбрать файл</button>
+    <div class="actions" style="display: flex; gap: 10px; align-items: center; background: #eee; padding: 15px; border-radius: 8px;">
+        <button @onclick="OpenAppAsync" disabled="@(isBusy || isWordRunning)" class="btn btn-primary">
+            @(isWordRunning ? "⏳ Word открыт..." : "Открыть Word")
+        </button>
 
-    @if (selectedFile != null)
+        <InputFile OnChange="HandleFileSelected" id="filePicker" style="display:none" />
+        <button class="btn btn-secondary" onclick="document.getElementById('filePicker').click()" disabled="@isBusy">📎 Выбрать файл</button>
+
+        @if (selectedFile != null)
+        {
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">📄 @selectedFile.Name</span>
+                <button @onclick="UploadToMinioHttp" class="btn btn-success" disabled="@isBusy">
+                    🚀 Сохранить в MinIO
+                </button>
+            </div>
+        }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(errorMessage))
     {
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">📄 @selectedFile.Name</span>
-            <button @onclick="UploadToMinioHttp" class="btn btn-success" disabled="@isBusy">
-                🚀 Сохранить в MinIO
-            </button>
+        <div class="alert alert-danger" style="color:red; margin-top: 20px; border: 1px solid red; padding: 10px; border-radius: 5px;">
+            <b>Ошибка:</b> @errorMessage
         </div>
     }
-</div>
 
-@if (!string.IsNullOrWhiteSpace(errorMessage))
-{
-    <div class="alert alert-danger" style="color:red; margin-top: 20px; border: 1px solid red; padding: 10px; border-radius: 5px;">
-        <b>Ошибка:</b> @errorMessage
+    <hr />
+
+    <div class="file-list-section" style="margin-top: 10px;">
+        <div class="d-flex justify-content-between align-items-center">
+            <h3>Файлы в хранилище</h3>
+            <div style="display: flex; gap: 10px;">
+                @if (uploadedFiles.Any())
+                {
+                    <button class="btn btn-sm btn-outline-dark" @onclick="ToggleSelectAll">
+                        @(selectedFiles.Count == uploadedFiles.Count ? "Снять всё" : "Выбрать всё")
+                    </button>
+                    <button class="btn btn-sm btn-danger" @onclick="DownloadSelected" disabled="@(!selectedFiles.Any() || isBusy)">
+                        📥 Скачать выбранные (@selectedFiles.Count)
+                    </button>
+                }
+                <button class="btn btn-sm btn-outline-primary" @onclick="RefreshFileList">🔄 Обновить</button>
+            </div>
+        </div>
+
+        @if (uploadedFiles.Count == 0)
+        {
+            <p style="color: gray; font-style: italic; margin-top: 10px;">Список пуст. Загрузите файл или проверьте MinIO.</p>
+        }
+        else
+        {
+            <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
+                @foreach (var file in uploadedFiles)
+                {
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 1px solid #eee; border-radius: 6px; background: white;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <input type="checkbox"
+                                   checked="@selectedFiles.Contains(file)"
+                                   @onchange="@((e) => ToggleFileSelection(file, e.Value))"
+                                   style="width: 18px; height: 18px; cursor: pointer;" />
+                            <span style="font-weight: 500;">@file</span>
+                        </div>
+                        <div style="display: flex; gap: 5px;">
+                            <a href="http://localhost:9000/bucket/@file" target="_blank" class="btn btn-sm btn-info" style="color:white; text-decoration:none;">Открыть</a>
+                            <a href="http://localhost:9000/bucket/@file" download="@file" class="btn btn-sm btn-success" style="color:white; text-decoration:none;">Скачать</a>
+                            @if (file.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) ||
+                                 file.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <button class="btn btn-sm btn-warning" @onclick="() => OpenEditor(file)" disabled="@isBusy">
+                                    ✏️ Редактировать
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
     </div>
 }
+else
+{
+    <!-- ПОЛНОЭКРАННЫЙ РЕДАКТОР -->
+    <div style="display: flex; flex-direction: column; height: calc(100vh - 40px);">
 
-<hr />
-
-<div class="file-list-section" style="margin-top: 30px;">
-    <div class="d-flex justify-content-between align-items-center">
-        <h3>Файлы в хранилище</h3>
-        <div style="display: flex; gap: 10px;">
-            @if (uploadedFiles.Any())
-            {
-                <button class="btn btn-sm btn-outline-dark" @onclick="ToggleSelectAll">
-                    @(selectedFiles.Count == uploadedFiles.Count ? "Снять всё" : "Выбрать всё")
-                </button>
-                <button class="btn btn-sm btn-danger" @onclick="DownloadSelected" disabled="@(!selectedFiles.Any() || isBusy)">
-                    📥 Скачать выбранные (@selectedFiles.Count)
-                </button>
-            }
-            <button class="btn btn-sm btn-outline-primary" @onclick="RefreshFileList">🔄 Обновить</button>
+        <!-- Шапка -->
+        <div style="display:flex; align-items:center; justify-content:space-between; padding: 10px 16px; background: #1b6ec2; color: white; border-radius: 8px 8px 0 0; flex-shrink:0;">
+            <div style="display:flex; align-items:center; gap: 12px;">
+                <span style="font-size: 18px; font-weight: 600;">✏️ @editingFileName</span>
+                <span style="font-size: 12px; opacity: 0.8;">
+                    @(isSaving ? "💾 Сохраняю..." : (lastSavedAt.HasValue ? $"✅ Сохранено в {lastSavedAt:HH:mm:ss}" : ""))
+                </span>
+            </div>
+            <button class="btn btn-sm btn-light" @onclick="CloseEditorAndSave" disabled="@isSaving">
+                @(isSaving ? "⏳ Сохраняю..." : "✖ Закрыть")
+            </button>
         </div>
+
+        @if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            <div style="color:red; background:#fff0f0; padding: 8px 16px; border: 1px solid red; font-size:13px;">
+                <b>Ошибка:</b> @errorMessage
+            </div>
+        }
+
+        <!-- Тулбар (для обоих типов файлов) -->
+        <div style="display:flex; gap:5px; flex-wrap:wrap; align-items:center; background:#f0f4ff; padding: 8px 12px; border: 1px solid #d0daf0; border-top: none; flex-shrink:0;">
+            <button class="btn btn-sm btn-outline-dark" title="Жирный" @onclick='() => ExecCmd("bold")'><b>Ж</b></button>
+            <button class="btn btn-sm btn-outline-dark" title="Курсив" @onclick='() => ExecCmd("italic")'><i>К</i></button>
+            <button class="btn btn-sm btn-outline-dark" title="Подчёркивание" @onclick='() => ExecCmd("underline")'>П̲</button>
+            <button class="btn btn-sm btn-outline-dark" title="Зачёркивание" @onclick='() => ExecCmd("strikeThrough")'>З̶</button>
+            <div style="width:1px;height:24px;background:#bbb;margin:0 4px;"></div>
+            <button class="btn btn-sm btn-outline-dark" title="По левому краю" @onclick='() => ExecCmd("justifyLeft")'>⬅</button>
+            <button class="btn btn-sm btn-outline-dark" title="По центру" @onclick='() => ExecCmd("justifyCenter")'>↔</button>
+            <button class="btn btn-sm btn-outline-dark" title="По правому краю" @onclick='() => ExecCmd("justifyRight")'>➡</button>
+            <button class="btn btn-sm btn-outline-dark" title="По ширине" @onclick='() => ExecCmd("justifyFull")'>⬌</button>
+            <div style="width:1px;height:24px;background:#bbb;margin:0 4px;"></div>
+            <button class="btn btn-sm btn-outline-dark" title="Маркированный список" @onclick='() => ExecCmd("insertUnorderedList")'>• Список</button>
+            <button class="btn btn-sm btn-outline-dark" title="Нумерованный список" @onclick='() => ExecCmd("insertOrderedList")'>1. Список</button>
+            <div style="width:1px;height:24px;background:#bbb;margin:0 4px;"></div>
+            <button class="btn btn-sm btn-outline-dark" title="Отменить" @onclick='() => ExecCmd("undo")'>↩</button>
+            <button class="btn btn-sm btn-outline-dark" title="Повторить" @onclick='() => ExecCmd("redo")'>↪</button>
+            <div style="width:1px;height:24px;background:#bbb;margin:0 4px;"></div>
+            <select class="form-select form-select-sm" style="width:100px;" @onchange="ChangeFontSize">
+                <option value="">Размер</option>
+                <option value="1">8px</option>
+                <option value="2">10px</option>
+                <option value="3">12px</option>
+                <option value="4">14px</option>
+                <option value="5">18px</option>
+                <option value="6">24px</option>
+                <option value="7">36px</option>
+            </select>
+            <select class="form-select form-select-sm" style="width:130px;" @onchange="ChangeFontFamily">
+                <option value="">Шрифт</option>
+                <option value="Arial">Arial</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Courier New">Courier New</option>
+                <option value="Segoe UI">Segoe UI</option>
+                <option value="Georgia">Georgia</option>
+            </select>
+            <div style="display:flex; align-items:center; gap:4px; margin-left:4px;">
+                <label style="font-size:12px; color:#555; margin:0;">Цвет:</label>
+                <input type="color" style="width:30px; height:28px; border:none; cursor:pointer; padding:0;" @onchange="ChangeTextColor" />
+            </div>
+        </div>
+
+        <!-- Поле редактора -->
+        <div id="richEditor"
+             contenteditable="true"
+             style="flex:1; overflow-y:auto; padding: 24px 32px; font-size:14px; line-height:1.8; outline:none; background:white; border: 1px solid #d0daf0; border-top:none; border-radius: 0 0 8px 8px; font-family:'Segoe UI',sans-serif; min-height:0;">
+        </div>
+
     </div>
-
-    @if (uploadedFiles.Count == 0)
-    {
-        <p style="color: gray; font-style: italic; margin-top: 10px;">Список пуст. Загрузите файл или проверьте MinIO.</p>
-    }
-    else
-    {
-        <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
-            @foreach (var file in uploadedFiles)
-            {
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 1px solid #eee; border-radius: 6px; background: white; transition: 0.3s;">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <input type="checkbox" 
-                               checked="@selectedFiles.Contains(file)" 
-                               @onchange="@((e) => ToggleFileSelection(file, e.Value))" 
-                               style="width: 18px; height: 18px; cursor: pointer;" />
-                        <span style="font-weight: 500;">@file</span>
-                    </div>
-                    <div style="display: flex; gap: 5px;">
-                        <a href="http://localhost:9000/bucket/@file" target="_blank" class="btn btn-sm btn-info" style="color: white; text-decoration: none;">Открыть</a>
-                        <a href="http://localhost:9000/bucket/@file" download="@file" class="btn btn-sm btn-success" style="color: white; text-decoration: none;">Скачать</a>
-                    </div>
-                </div>
-            }
-        </div>
-    }
-</div>
+}
 
 @code {
     private string status = "Готово";
@@ -101,13 +187,167 @@
     private PeriodicTimer? pollTimer;
 
     private IBrowserFile? selectedFile;
-    private List<string> uploadedFiles = new(); 
-    private HashSet<string> selectedFiles = new(); // Для хранения выбранных файлов
+    private List<string> uploadedFiles = new();
+    private HashSet<string> selectedFiles = new();
+
+    // Редактор
+    private bool isEditorOpen = false;
+    private string? editingFileName;
+    private bool isSaving = false;
+    private DateTime? lastSavedAt;
 
     protected override async Task OnInitializedAsync()
     {
         await RefreshFileList();
     }
+
+  
+    // РЕДАКТОР
+  
+
+    private async Task OpenEditor(string fileName)
+    {
+        editingFileName = fileName;
+        errorMessage = null;
+        lastSavedAt = null;
+        isEditorOpen = true;
+        StateHasChanged();
+
+        try
+        {
+            isBusy = true;
+            status = $"Загружаем {fileName}...";
+            StateHasChanged();
+
+            await Task.Delay(150); // дать Blazor отрисовать редактор
+
+            if (fileName.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+            {
+                var content = await http.GetStringAsync($"http://localhost:9000/bucket/{fileName}");
+                await JS.InvokeVoidAsync("wtdSetContent", content, false);
+            }
+            else if (fileName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+            {
+                // Читаем текст через бэкенд
+                var url = Uri.EscapeDataString($"http://localhost:9000/bucket/{fileName}");
+                var result = await http.GetFromJsonAsync<DocxReadResult>($"/docx-read?url={url}");
+                await JS.InvokeVoidAsync("wtdSetContent", result?.Text ?? "", false);
+            }
+
+            status = $"✏️ {fileName}";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Не удалось загрузить: {ex.Message}";
+            isEditorOpen = false;
+        }
+        finally { isBusy = false; }
+    }
+
+    private async Task CloseEditorAndSave()
+    {
+        if (editingFileName == null) return;
+
+        try
+        {
+            isSaving = true;
+
+            if (editingFileName.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+            {
+                await SaveTxt();
+            }
+            else if (editingFileName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+            {
+                await SaveDocx();
+            }
+
+            CloseEditor();
+        }
+        finally { isSaving = false; }
+    }
+
+    private async Task SaveTxt()
+    {
+        var htmlContent = await JS.InvokeAsync<string>("wtdGetContent");
+        var bytes = System.Text.Encoding.UTF8.GetBytes(htmlContent ?? "");
+        var byteContent = new ByteArrayContent(bytes);
+        byteContent.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        var response = await http.PutAsync($"http://localhost:9000/bucket/{editingFileName}", byteContent);
+        if (response.IsSuccessStatusCode)
+        {
+            lastSavedAt = DateTime.Now;
+            status = $"✅ '{editingFileName}' сохранён";
+        }
+        else
+        {
+            errorMessage = $"Ошибка сохранения: {response.StatusCode}";
+        }
+    }
+
+    private async Task SaveDocx()
+    {
+        // Получаем plain text из редактора
+        var plainText = await JS.InvokeAsync<string>("wtdGetPlainText");
+        var minioUrl = $"http://localhost:9000/bucket/{editingFileName}";
+
+        var response = await http.PostAsJsonAsync("/docx-save", new
+        {
+            Url = minioUrl,
+            Text = plainText
+        });
+
+        if (response.IsSuccessStatusCode)
+        {
+            lastSavedAt = DateTime.Now;
+            status = $"✅ '{editingFileName}' сохранён";
+        }
+        else
+        {
+            var err = await response.Content.ReadAsStringAsync();
+            errorMessage = $"Ошибка сохранения: {err}";
+        }
+    }
+
+    private void CloseEditor()
+    {
+        isEditorOpen = false;
+        editingFileName = null;
+        lastSavedAt = null;
+        status = "Готово";
+    }
+
+    private async Task ExecCmd(string command)
+        => await JS.InvokeVoidAsync("document.execCommand", command, false, null);
+
+    private async Task ChangeFontSize(ChangeEventArgs e)
+    {
+        var size = e.Value?.ToString();
+        if (!string.IsNullOrEmpty(size))
+            await JS.InvokeVoidAsync("document.execCommand", "fontSize", false, size);
+    }
+
+    private async Task ChangeFontFamily(ChangeEventArgs e)
+    {
+        var font = e.Value?.ToString();
+        if (!string.IsNullOrEmpty(font))
+            await JS.InvokeVoidAsync("document.execCommand", "fontName", false, font);
+    }
+
+    private async Task ChangeTextColor(ChangeEventArgs e)
+    {
+        var color = e.Value?.ToString();
+        if (!string.IsNullOrEmpty(color))
+            await JS.InvokeVoidAsync("document.execCommand", "foreColor", false, color);
+    }
+
+    public class DocxReadResult
+    {
+        public string Text { get; set; } = "";
+    }
+
+    // =====================
+    // СТАНДАРТНАЯ ЛОГИКА
+    // =====================
 
     private void HandleFileSelected(InputFileChangeEventArgs e)
     {
@@ -141,13 +381,10 @@
                 var nsmgr = new XmlNamespaceManager(doc.NameTable);
                 nsmgr.AddNamespace("s3", "http://s3.amazonaws.com/doc/2006-03-01/");
                 var nodes = doc.SelectNodes("//s3:Contents/s3:Key", nsmgr);
-                
                 uploadedFiles.Clear();
                 selectedFiles.Clear();
                 if (nodes != null)
-                {
                     foreach (XmlNode node in nodes) uploadedFiles.Add(node.InnerText);
-                }
                 status = "Список синхронизирован";
             }
         }
@@ -166,7 +403,6 @@
             var content = new StreamContent(stream);
             content.Headers.ContentType = new MediaTypeHeaderValue(selectedFile.ContentType ?? "application/octet-stream");
             var response = await http.PutAsync($"http://localhost:9000/bucket/{selectedFile.Name}", content);
-
             if (response.IsSuccessStatusCode)
             {
                 status = "✅ Загружено!";
@@ -186,7 +422,6 @@
         foreach (var file in selectedFiles)
         {
             var url = $"http://localhost:9000/bucket/{file}";
-            // Эмуляция клика для каждого файла с паузой
             await JS.InvokeVoidAsync("eval", $@"
                 var a = document.createElement('a');
                 a.href = '{url}';
@@ -195,14 +430,13 @@
                 a.click();
                 document.body.removeChild(a);
             ");
-            await Task.Delay(600); 
+            await Task.Delay(600);
         }
         status = "✅ Выгрузка завершена";
         selectedFiles.Clear();
         isBusy = false;
     }
 
-    // --- Логика Word ---
     private async Task OpenAppAsync()
     {
         try
@@ -254,7 +488,7 @@
                     }
                     else if (dto.Status == "closed" || dto.Status == "error")
                     {
-                        status = dto.Status == "closed" ? "Word закрыт" : $"Ошибка Word";
+                        status = dto.Status == "closed" ? "Word закрыт" : "Ошибка Word";
                         isWordRunning = false;
                         pollTimer?.Dispose();
                     }
@@ -265,7 +499,8 @@
         catch { }
     }
 
-    public class WordStatusResponse {
+    public class WordStatusResponse
+    {
         public string Status { get; set; } = "";
         public DateTimeOffset? StartedAt { get; set; }
     }

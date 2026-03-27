@@ -29,6 +29,7 @@ static class Program
         app.UseCors(x => x.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
 
         var statusStore = new ConcurrentDictionary<string, WordStatusUpdateRequest>();
+        WordStatusUpdateRequest? latestWordStatus = null;
 
         app.UseDefaultFiles();
         var contentTypeProvider = new FileExtensionContentTypeProvider();
@@ -54,7 +55,6 @@ static class Program
         {
             try
             {
-                // Скачиваем файл из MinIO во временную папку
                 using var httpClient = new HttpClient();
                 var bytes = await httpClient.GetByteArrayAsync(request.MinioUrl);
 
@@ -64,7 +64,6 @@ static class Program
 
                 await File.WriteAllBytesAsync(localPath, bytes);
 
-                // Передаём десктоп-агенту
                 AppCommands.RequestOpenFileInWord(new OpenFileSession
                 {
                     SessionId = request.SessionId,
@@ -81,13 +80,15 @@ static class Program
             }
         });
 
-        // ── Статус Word ──
+        // ── Статус Word по sessionId ──
         app.MapPost("/word-status-update", (WordStatusUpdateRequest dto) =>
         {
             if (string.IsNullOrWhiteSpace(dto.SessionId))
                 return Results.BadRequest("SessionId обязателен");
 
             statusStore[dto.SessionId] = dto;
+            latestWordStatus = dto;
+
             return Results.Ok(new { message = "Статус получен" });
         });
 
@@ -95,7 +96,35 @@ static class Program
         {
             if (!statusStore.TryGetValue(sessionId, out var status))
                 return Results.NotFound("Статус не найден");
+
             return Results.Ok(status);
+        });
+
+        // ── Глобальный статус Word для веб-оверлея ──
+        app.MapGet("/word-active", () =>
+        {
+            if (latestWordStatus is null)
+            {
+                return Results.Ok(new
+                {
+                    isWordOpen = false,
+                    status = "idle",
+                    sessionId = (string?)null,
+                    startedAt = (DateTimeOffset?)null,
+                    closedAt = (DateTimeOffset?)null,
+                    errorMessage = (string?)null
+                });
+            }
+
+            return Results.Ok(new
+            {
+                isWordOpen = latestWordStatus.IsWordOpen,
+                status = latestWordStatus.Status,
+                sessionId = latestWordStatus.SessionId,
+                startedAt = latestWordStatus.StartedAt,
+                closedAt = latestWordStatus.ClosedAt,
+                errorMessage = latestWordStatus.ErrorMessage
+            });
         });
 
         // ── Чтение DOCX → plain text (для браузерного редактора) ──
@@ -112,8 +141,10 @@ static class Program
                 var sb = new StringBuilder();
                 var body = doc.MainDocumentPart?.Document?.Body;
                 if (body != null)
+                {
                     foreach (var para in body.Elements<Paragraph>())
                         sb.AppendLine(para.InnerText);
+                }
 
                 return Results.Ok(new { text = sb.ToString() });
             }
@@ -141,11 +172,13 @@ static class Program
                     if (body != null)
                     {
                         body.RemoveAllChildren<Paragraph>();
+
                         foreach (var line in req.Text.Split('\n'))
                         {
                             var para = new Paragraph(new Run(new Text(line.TrimEnd('\r'))));
                             body.AppendChild(para);
                         }
+
                         doc.MainDocumentPart!.Document.Save();
                     }
                 }
@@ -155,6 +188,7 @@ static class Program
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
 
                 var response = await httpClient.PutAsync(req.Url, content);
+
                 return response.IsSuccessStatusCode
                     ? Results.Ok(new { message = "Сохранено" })
                     : Results.Problem($"Ошибка MinIO: {response.StatusCode}");

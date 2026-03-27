@@ -1,3 +1,86 @@
 ﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject HttpClient Http
 
-@Body
+<div class="app-shell">
+    @Body
+</div>
+
+@if (isWordOpen)
+{
+    <div class="word-overlay">
+        <div class="word-modal">
+            <h3>Идёт работа в Word</h3>
+            <p>Сначала закройте Word, чтобы продолжить работу на сайте.</p>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isWordOpen;
+    private PeriodicTimer? timer;
+    private CancellationTokenSource? cts;
+
+    protected override void OnInitialized()
+    {
+        cts = new CancellationTokenSource();
+        timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        _ = PollWordStatusAsync(cts.Token);
+    }
+
+    private async Task PollWordStatusAsync(CancellationToken token)
+    {
+        try
+        {
+            await RefreshStatusAsync(token);
+
+            while (timer is not null && await timer.WaitForNextTickAsync(token))
+            {
+                await RefreshStatusAsync(token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task RefreshStatusAsync(CancellationToken token)
+    {
+        try
+        {
+            var status = await Http.GetFromJsonAsync<WordActiveDto>("http://localhost:5000/word-active", token);
+            var nextValue = status?.IsWordOpen == true;
+
+            if (nextValue != isWordOpen)
+            {
+                isWordOpen = nextValue;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch
+        {
+            if (isWordOpen)
+            {
+                isWordOpen = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        cts?.Cancel();
+        timer?.Dispose();
+        cts?.Dispose();
+    }
+
+    private sealed class WordActiveDto
+    {
+        public bool IsWordOpen { get; set; }
+        public string? Status { get; set; }
+        public string? SessionId { get; set; }
+        public DateTimeOffset? StartedAt { get; set; }
+        public DateTimeOffset? ClosedAt { get; set; }
+        public string? ErrorMessage { get; set; }
+    }
+}

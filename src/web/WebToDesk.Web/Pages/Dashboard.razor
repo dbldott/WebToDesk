@@ -114,7 +114,6 @@
 }
 else
 {
-    <!-- ПОЛНОЭКРАННЫЙ БРАУЗЕРНЫЙ РЕДАКТОР -->
     <div style="display: flex; flex-direction: column; height: calc(100vh - 40px);">
 
         <div style="display:flex; align-items:center; justify-content:space-between; padding: 10px 16px; background: #1b6ec2; color: white; border-radius: 8px 8px 0 0; flex-shrink:0;">
@@ -184,6 +183,18 @@ else
     </div>
 }
 
+@if (showWordOverlay)
+{
+    <div style="position:fixed; inset:0; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; z-index:99999;">
+        <div style="width:min(460px,92%); background:#fff; border-radius:16px; padding:24px; box-shadow:0 20px 60px rgba(0,0,0,0.25); text-align:center;">
+            <h3 style="margin:0 0 12px 0; font-size:22px;">Идёт работа в Word</h3>
+            <p style="margin:0; line-height:1.5; font-size:16px;">
+                Сначала закройте Word, чтобы продолжить работу на сайте.
+            </p>
+        </div>
+    </div>
+}
+
 @code {
     private string status = "Готово";
     private string sessionId = "";
@@ -197,23 +208,62 @@ else
     private List<string> uploadedFiles = new();
     private HashSet<string> selectedFiles = new();
 
-    // Браузерный редактор
     private bool isEditorOpen = false;
     private string? editingFileName;
     private bool isSaving = false;
     private DateTime? lastSavedAt;
 
-    // Открыт в Word
     private string? wordOpenFile;
+
+    private bool showWordOverlay = false;
+    private PeriodicTimer? overlayTimer;
+    private CancellationTokenSource? overlayCts;
 
     protected override async Task OnInitializedAsync()
     {
         await RefreshFileList();
+        StartWordOverlayPolling();
     }
 
-    // =====================
-    // ОТКРЫТЬ В WORD (десктоп)
-    // =====================
+    private void StartWordOverlayPolling()
+    {
+        overlayCts = new CancellationTokenSource();
+        overlayTimer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RefreshWordOverlayAsync();
+
+                while (await overlayTimer.WaitForNextTickAsync(overlayCts.Token))
+                {
+                    await RefreshWordOverlayAsync();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
+    }
+
+    private async Task RefreshWordOverlayAsync()
+    {
+        try
+        {
+            var dto = await http.GetFromJsonAsync<WordActiveResponse>("http://localhost:5000/word-active");
+            var next = dto?.IsWordOpen == true;
+
+            if (next != showWordOverlay)
+            {
+                showWordOverlay = next;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch
+        {
+        }
+    }
 
     private async Task OpenFileInWord(string fileName)
     {
@@ -253,10 +303,6 @@ else
         }
         finally { isBusy = false; }
     }
-
-    // =====================
-    // БРАУЗЕРНЫЙ РЕДАКТОР
-    // =====================
 
     private async Task OpenEditor(string fileName)
     {
@@ -364,11 +410,10 @@ else
             await JS.InvokeVoidAsync("document.execCommand", "foreColor", false, e.Value.ToString());
     }
 
-    public class DocxReadResult { public string Text { get; set; } = ""; }
-
-    // =====================
-    // СТАНДАРТНАЯ ЛОГИКА
-    // =====================
+    public class DocxReadResult
+    {
+        public string Text { get; set; } = "";
+    }
 
     private void HandleFileSelected(InputFileChangeEventArgs e)
     {
@@ -409,7 +454,10 @@ else
                 status = "Список синхронизирован";
             }
         }
-        catch { status = "Ошибка обновления списка"; }
+        catch
+        {
+            status = "Ошибка обновления списка";
+        }
         finally { isBusy = false; }
     }
 
@@ -507,5 +555,15 @@ else
     {
         public string Status { get; set; } = "";
         public DateTimeOffset? StartedAt { get; set; }
+    }
+
+    public class WordActiveResponse
+    {
+        public bool IsWordOpen { get; set; }
+        public string? Status { get; set; }
+        public string? SessionId { get; set; }
+        public DateTimeOffset? StartedAt { get; set; }
+        public DateTimeOffset? ClosedAt { get; set; }
+        public string? ErrorMessage { get; set; }
     }
 }

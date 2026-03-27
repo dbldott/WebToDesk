@@ -27,6 +27,45 @@
     </div>
 
     <script src="_framework/blazor.webassembly.js"></script>
+
+    <script>
+        window.wtdSetContent = function (text, isHtml) {
+            var el = document.getElementById('richEditor');
+            if (!el) return;
+
+            if (isHtml || (text && text.trim().startsWith('<'))) {
+                el.innerHTML = text;
+            } else {
+                el.innerHTML = text
+                    ? text.replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/\n/g, '<br>')
+                    : '';
+            }
+
+            el.focus();
+        };
+
+        window.wtdGetContent = function () {
+            var el = document.getElementById('richEditor');
+            return el ? el.innerHTML : '';
+        };
+
+        window.wtdGetPlainText = function () {
+            var el = document.getElementById('richEditor');
+            if (!el) return '';
+
+            var html = el.innerHTML;
+            html = html.replace(/<br\s*\/?>/gi, '\n');
+            html = html.replace(/<\/p>/gi, '\n');
+            html = html.replace(/<\/div>/gi, '\n');
+
+            var tmp = document.createElement('div');
+            tmp.innerHTML = html;
+            return tmp.textContent || tmp.innerText || '';
+        };
+    </script>
 </body>
 
 </html>

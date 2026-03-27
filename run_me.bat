@@ -1,30 +1,62 @@
 @echo off
+chcp 65001 >nul
+cd /d "%~dp0"
+
 set MINIO_ROOT_USER=minioadmin
 set MINIO_ROOT_PASSWORD=minioadmin
 
-echo --- 1. ЗАПУСК СЕРВЕРА ---
-:: Запускаем сервер в отдельном окне, чтобы он не мешал выполнять команды дальше
-start "MinIO Server" minio.exe server C:\MinIO_Server\data --console-address ":9001"
+echo ==============================================
+echo  WebToDesk — запуск
+echo ==============================================
 
-echo Ждем 5 секунд, пока сервер проснется...
-timeout /t 5
+:: --- 1. MINIO ---
+echo.
+echo [1/4] Запуск MinIO...
+if not exist "%~dp0data" mkdir "%~dp0data"
+start "MinIO Server" "%~dp0minio.exe" server "%~dp0data" --console-address ":9001"
+echo Ждём 5 секунд...
+timeout /t 5 /nobreak >nul
 
-echo --- 2. НАСТРОЙКА КЛИЕНТА (MC) ---
-:: Привязываем клиент к нашему серверу
-mc.exe alias set myminio http://127.0.0.1:9000/ minioadmin minioadmin
+:: --- 2. НАСТРОЙКА БАКЕТА ---
+echo.
+echo [2/4] Настройка бакета...
+"%~dp0mc.exe" alias set myminio http://127.0.0.1:9000/ minioadmin minioadmin
+"%~dp0mc.exe" mb --ignore-existing myminio/bucket
+"%~dp0mc.exe" anonymous set public myminio/bucket
 
-echo --- 3. СОЗДАНИЕ БАКЕТА ---
+:: --- 3. СБОРКА BLAZOR ---
+echo.
+echo [3/4] Сборка веб-интерфейса...
 
-mc.exe mb myminio/bucket
+set WEB_SRC=%~dp0src\web\WebToDesk.Web
+set DESKTOP_WWWROOT=%~dp0src\desktop\Desktop.App\WebToDesk\wwwroot
+set INDEX_TEMPLATE=%~dp0src\desktop\Desktop.App\WebToDesk\index.template.html
 
-echo --- 4. ОТКЛЮЧЕНИЕ АВТОРИЗАЦИИ (PUBLIC MODE) ---
-:: Делаем бакет полностью публичным, чтобы код не спрашивал пароли
-mc.exe anonymous set public myminio/bucket
+dotnet publish "%WEB_SRC%" -c Release -o "%WEB_SRC%\publish" --nologo -v quiet
 
-echo --------------------------------------------------
-echo ВСЁ ГОТОВО! 
-echo Консоль (UI): http://127.0.0.1:9001/
-echo API (для кода): http://127.0.0.1:9000/
-echo Бакет 'bucket' открыт для чтения и записи.
-echo --------------------------------------------------
-pause
+if errorlevel 1 (
+    echo ОШИБКА сборки! Проверьте что установлен .NET SDK.
+    pause
+    exit /b 1
+)
+
+echo Копирование файлов интерфейса...
+xcopy /E /Y /I /Q "%WEB_SRC%\publish\wwwroot\*" "%DESKTOP_WWWROOT%\"
+
+:: Копируем наш index.html с JS-функциями поверх publish-версии
+echo Применяем index.html с JS-функциями...
+copy /Y "%INDEX_TEMPLATE%" "%DESKTOP_WWWROOT%\index.html" >nul
+
+:: --- 4. ЗАПУСК ПРИЛОЖЕНИЯ ---
+echo.
+echo [4/4] Запуск приложения...
+start "WebToDesk" cmd /c "cd /d "%~dp0src\desktop\Desktop.App\WebToDesk" && dotnet run"
+
+echo.
+echo ==============================================
+echo  Готово!
+echo  Браузер:   http://localhost:5000
+echo  MinIO UI:  http://localhost:9001
+echo ==============================================
+timeout /t 4 /nobreak >nul
+start http://localhost:5000

@@ -3,5 +3,19 @@
 .idea/
 *.user
 *.suo
+
+# Blazor WASM скомпилированные файлы (пересобираются батником)
+**/wwwroot/_framework/
+**/publish/
+
+# Бинарники MinIO (тяжёлые, у каждого свои)
 minio.exe
 mc.exe
+
+# Данные MinIO (у каждого локальные)
+data/
+
+# Системное
+.DS_Store
+Thumbs.db
+desktop.ini

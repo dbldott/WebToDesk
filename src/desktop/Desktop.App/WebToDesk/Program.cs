@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -17,7 +18,11 @@ static class Program
     {
         ApplicationConfiguration.Initialize();
 
-        var builder = WebApplication.CreateBuilder(args);
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            Args = args,
+            WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot")
+        });
         builder.Services.AddCors();
 
         var app = builder.Build();
@@ -26,7 +31,12 @@ static class Program
         var statusStore = new ConcurrentDictionary<string, WordStatusUpdateRequest>();
 
         app.UseDefaultFiles();
-        app.UseStaticFiles();
+        var contentTypeProvider = new FileExtensionContentTypeProvider();
+        contentTypeProvider.Mappings[".dat"] = "application/octet-stream";
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            ContentTypeProvider = contentTypeProvider
+        });
 
         // ── Открыть Word (без файла) ──
         app.MapPost("/open-app", (OpenAppRequest request) =>

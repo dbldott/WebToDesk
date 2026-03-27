@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WebToDesk.Web</title>
     <base href="/" />
+
     <link rel="stylesheet" href="css/app.css" />
     <link rel="icon" type="image/png" href="favicon.png" />
 </head>
@@ -28,37 +29,38 @@
     <script src="_framework/blazor.webassembly.js"></script>
 
     <script>
-        // Вставить содержимое в редактор
         window.wtdSetContent = function (text, isHtml) {
             var el = document.getElementById('richEditor');
             if (!el) return;
+
             if (isHtml || (text && text.trim().startsWith('<'))) {
                 el.innerHTML = text;
             } else {
                 el.innerHTML = text
                     ? text.replace(/&/g, '&amp;')
-                           .replace(/</g, '&lt;')
-                           .replace(/>/g, '&gt;')
-                           .replace(/\n/g, '<br>')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/\n/g, '<br>')
                     : '';
             }
+
             el.focus();
         };
 
-        // Получить HTML из редактора (для TXT)
         window.wtdGetContent = function () {
             var el = document.getElementById('richEditor');
             return el ? el.innerHTML : '';
         };
 
-        // Получить plain text из редактора (для DOCX)
         window.wtdGetPlainText = function () {
             var el = document.getElementById('richEditor');
             if (!el) return '';
+
             var html = el.innerHTML;
             html = html.replace(/<br\s*\/?>/gi, '\n');
             html = html.replace(/<\/p>/gi, '\n');
             html = html.replace(/<\/div>/gi, '\n');
+
             var tmp = document.createElement('div');
             tmp.innerHTML = html;
             return tmp.textContent || tmp.innerText || '';

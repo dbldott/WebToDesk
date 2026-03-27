@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorClientProject>$(MSBuildProjectDirectory)\..\..\..\web\WebToDesk.Web\WebToDesk.Web.csproj</BlazorClientProject>
+    <BlazorClientPublishDir>$(BaseIntermediateOutputPath)blazor-client</BlazorClientPublishDir>
+    <BlazorClientWwwRoot>$(BlazorClientPublishDir)\wwwroot\</BlazorClientWwwRoot>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,15 +24,20 @@
 
 
 <ItemGroup>
-  <Content Include="wwwroot\**\*">
-    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-  </Content>
-</ItemGroup>
-
-
-
-<ItemGroup>
   <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
 </ItemGroup>
+
+  <Target Name="PublishBlazorClient" BeforeTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <RemoveDir Directories="$(BlazorClientPublishDir)" />
+    <MakeDir Directories="$(BlazorClientPublishDir)" />
+    <Exec Command="dotnet publish &quot;$(BlazorClientProject)&quot; -c $(Configuration) -o &quot;$(BlazorClientPublishDir)&quot; --nologo -v quiet" />
+    <RemoveDir Directories="$(OutDir)wwwroot" />
+    <MakeDir Directories="$(OutDir)wwwroot" />
+    <ItemGroup>
+      <BlazorClientFiles Include="$(BlazorClientWwwRoot)**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BlazorClientFiles)"
+          DestinationFiles="@(BlazorClientFiles->'$(OutDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
 
 </Project>

@@ -4,9 +4,10 @@
 *.user
 *.suo
 
-# Blazor WASM скомпилированные файлы (пересобираются батником)
+# Blazor WASM скомпилированные файлы и временные publish-папки
 **/wwwroot/_framework/
 **/publish/
+**/publish-check/
 
 # Бинарники MinIO (тяжёлые, у каждого свои)
 minio.exe

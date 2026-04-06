@@ -2,12 +2,12 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Http;
 using System.Text;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
-using DocumentFormat.OpenXml.Packaging;
-using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace WebToDesk;
 
@@ -168,8 +168,8 @@ static class Program
 
                 using (var doc = WordprocessingDocument.Open(ms, true))
                 {
-                    var body = doc.MainDocumentPart?.Document?.Body;
-                    if (body != null)
+                    if (doc.MainDocumentPart?.Document is { } document
+                        && document.Body is { } body)
                     {
                         body.RemoveAllChildren<Paragraph>();
 
@@ -179,7 +179,7 @@ static class Program
                             body.AppendChild(para);
                         }
 
-                        doc.MainDocumentPart!.Document.Save();
+                        document.Save();
                     }
                 }
 
@@ -199,12 +199,33 @@ static class Program
             }
         });
 
+        app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
         app.MapGet("/", () => Results.Redirect("/index.html"));
         app.MapFallbackToFile("index.html");
 
-        Task.Run(() => app.Run("http://localhost:5000"));
+        try
+        {
+            using var mainForm = new Form1(app);
+            Application.Run(mainForm);
+        }
+        finally
+        {
+            try
+            {
+                app.StopAsync().GetAwaiter().GetResult();
+            }
+            catch
+            {
+            }
 
-        Application.Run(new Form1());
+            try
+            {
+                app.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            catch
+            {
+            }
+        }
     }
 }
 

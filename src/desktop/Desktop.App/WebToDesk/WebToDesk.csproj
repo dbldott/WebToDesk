@@ -19,6 +19,10 @@
     <None Include="app.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\..\..\..\Web2deck.png" Condition="Exists('..\..\..\..\Web2deck.png')">
+      <Link>Assets\Web2deck.png</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 

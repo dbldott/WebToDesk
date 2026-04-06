@@ -6,15 +6,19 @@ using System.Net.Http.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Microsoft.AspNetCore.Builder;
 
 namespace WebToDesk;
 
 public partial class Form1 : Form
 {
     private readonly HttpClient _httpClient = new();
+    private readonly WebApplication _webApp;
+    private readonly CancellationTokenSource _startupCts = new();
 
     private string _sessionId = string.Empty;
     private bool _isWordOpen = false;
+    private bool _startupComplete = false;
 
     private DateTimeOffset? _startedAt = null;
     private DateTimeOffset? _closedAt = null;
@@ -29,19 +33,62 @@ public partial class Form1 : Form
     private string? _watchedMinioUrl;
     private DateTime _lastUploadTime = DateTime.MinValue;
 
-    public Form1()
+    public Form1(WebApplication webApp)
     {
+        _webApp = webApp;
         InitializeComponent();
         this.Shown += Form1_Shown;
         notifyIcon1.DoubleClick += NotifyIcon1_DoubleClick;
+        ShowInTaskbar = false;
+        WindowState = FormWindowState.Minimized;
+        Opacity = 0;
     }
 
-    private void Form1_Shown(object? sender, EventArgs e)
+    private async void Form1_Shown(object? sender, EventArgs e)
     {
+        if (_startupComplete) return;
+
         _uiContext = SynchronizationContext.Current;
-        HideToTray();
         AppCommands.Register(OpenWordFromSignal);
         AppCommands.RegisterOpenFile(OpenFileInWordFromSignal);
+
+        using var splash = new SplashForm();
+        splash.Show();
+        splash.BringToFront();
+        splash.Activate();
+
+        try
+        {
+            var progress = new Progress<StartupProgress>(step => splash.Report(step.Message, step.ProgressPercent));
+            await StartupBootstrapper.InitializeAsync(_webApp, progress, _startupCts.Token);
+
+            _startupComplete = true;
+            splash.Report("Все готово. Уходим в трей...", 100);
+            await Task.Delay(350, _startupCts.Token);
+            HideToTray();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            splash.ShowError($"Не удалось завершить запуск.\r\n{ex.Message}");
+            MessageBox.Show(
+                this,
+                $"Не удалось завершить запуск WebToDesk.\r\n\r\n{ex.Message}",
+                "Ошибка запуска",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+
+            ExitApp();
+        }
+        finally
+        {
+            if (!splash.IsDisposed)
+            {
+                splash.Close();
+            }
+        }
     }
 
     // ── Старая логика: просто открыть Word ──
@@ -232,12 +279,17 @@ public partial class Form1 : Form
     // ── Стандартные методы формы ──
     private void HideToTray()
     {
+        Opacity = 0;
+        WindowState = FormWindowState.Minimized;
         this.Hide();
         this.ShowInTaskbar = false;
     }
 
     private void ShowFromTray()
     {
+        if (!_startupComplete) return;
+
+        Opacity = 1;
         this.Show();
         this.ShowInTaskbar = true;
         this.WindowState = FormWindowState.Normal;
@@ -262,6 +314,7 @@ public partial class Form1 : Form
 
     private void ExitApp()
     {
+        _startupCts.Cancel();
         StopWatcher();
         notifyIcon1.Visible = false;
         notifyIcon1.Dispose();
